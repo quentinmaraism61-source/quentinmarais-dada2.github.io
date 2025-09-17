@@ -80,3 +80,9 @@ rownames(track) <- sample.names
 head(track)
 ```
 
+
+
+```{r}
+taxa <- assignTaxonomy(seqtab.nochim, "~/tax/silva_nr_v132_train_set.fa.gz", multithread=TRUE)
+```
+
