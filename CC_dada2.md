@@ -1,11 +1,16 @@
 CC1_DADA2_QuentinMarais
 ================
+Quentin Marais
+
+# Installation du package “dada2”
 
 ``` r
 library(dada2)
 ```
 
     ## Loading required package: Rcpp
+
+# Chargement du jeu de données
 
 ``` r
 path <- "~/tutoriel_ADM/MiSeq_SOP"
@@ -36,14 +41,22 @@ list.files(path)
     ## [43] "mouse.dpw.metadata"            "mouse.time.design"            
     ## [45] "stability.batch"               "stability.files"
 
+# Créaton des listes pour les fichiers Forward (fnFs) et Reverse (fnRs)
+
 ``` r
 fnFs <- sort(list.files(path, pattern="_R1_001.fastq", full.names = TRUE))
 fnRs <- sort(list.files(path, pattern="_R2_001.fastq", full.names = TRUE))
 ```
 
+# Extraction du nom de chaque échantillon des fichiers
+
 ``` r
 sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
 ```
+
+# Visualisation des profils de qualité des reads
+
+## Qualité de la lecture Forward
 
 ``` r
 plotQualityProfile(fnFs[1:2])
@@ -51,11 +64,34 @@ plotQualityProfile(fnFs[1:2])
 
 ![](CC_dada2_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
 
+Le but de cette étape est de visualiser la qualité de lecture des
+nucléotides des reads.
+
+- En gris : La fréquence de chaque score de qualité pour chaque
+  position.
+- La ligne verte : La moyenne du score de qualité pour chaque position.
+- La ligne orange : Les quartiles montrant la variabilité de la qualité.
+- La ligne rouge : La proportion de lectures qui atteignent cette
+  position.
+
+Dans ce cas, on remarque que la qualité de mes reads en lecture Forward
+est bonne.
+
+## Qualité de la lecture Reverse
+
 ``` r
 plotQualityProfile(fnRs[1:2])
 ```
 
-![](CC_dada2_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+![](CC_dada2_files/figure-gfm/unnamed-chunk-6-1.png)<!-- --> Ici, on
+remarque directement que la qualité de lecture des reads est moins bonne
+que pour la lecture forward. Ce phénomène est connu en séquençage
+Illumina et se traite informatiquement grâce à la pipeline dada2. Ce
+score de qualité moins bon en Reverse est dû à une combinaison de
+facteurs comme la perte de processivité de l’ADN polymérase ou encore la
+diminution du rapport signal/bruit due à la chimie du séquençage.
+
+# Filtration
 
 ``` r
 filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
@@ -63,6 +99,10 @@ filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
 names(filtFs) <- sample.names
 names(filtRs) <- sample.names
 ```
+
+On relie noms des fichiers et noms des échantillons.
+
+## Filtration et pré-traitement des reads
 
 ``` r
 out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(240,160),
@@ -79,6 +119,17 @@ head(out)
     ## F3D143_S209_L001_R1_001.fastq     3178      2941
     ## F3D144_S210_L001_R1_001.fastq     4827      4312
 
+Le tableau nous montre le nombre de reads avant (reads.in) et après
+(reads.out) filtration. On remarque que la majorité des séquences a été
+conservée.
+
+# Taux d’erreur de séquençage
+
+Il arrive relativement régulièrement que des reads contiennent des
+erreurs de séquençage. La pipeline dada2 nous permet alors de
+discriminer les séquences qui existent réellement, des séquences
+contenant des erreurs de séquençage.
+
 ``` r
 errF <- learnErrors(filtFs, multithread=TRUE)
 ```
@@ -91,6 +142,8 @@ errR <- learnErrors(filtRs, multithread=TRUE)
 
     ## 22342720 total bases in 139642 reads from 20 samples will be used for learning the error rates.
 
+# Visualisation des taux d’erreur
+
 ``` r
 plotErrors(errF, nominalQ=TRUE)
 ```
@@ -98,7 +151,18 @@ plotErrors(errF, nominalQ=TRUE)
     ## Warning: Transformation introduced infinite values in continuous y-axis
     ## Transformation introduced infinite values in continuous y-axis
 
-![](CC_dada2_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+![](CC_dada2_files/figure-gfm/unnamed-chunk-11-1.png)<!-- --> Ici, la
+ligne noire représente le taux d’erreur estimé par l’algorithme. En
+rouge sont annotés les taux d’erreurs effectivement observés. Enfin la
+ligne rouge correspond au taux d’erreur attendu selon le Q score.
+
+On remarque que, les points rouges suivent en effet la ligne noire. La
+réalité semble suivre l’estimation. On observe également que plus le Q
+score augmente, plus le taux d’erreur diminue. Ceci étant attendu.
+
+# Algorithme de la pipeline dada2 : Correction ou identification
+
+## Sur les reads Foward
 
 ``` r
 dadaFs <- dada(filtFs, err=errF, multithread=TRUE)
@@ -125,6 +189,16 @@ dadaFs <- dada(filtFs, err=errF, multithread=TRUE)
     ## Sample 19 - 6504 reads in 1709 unique sequences.
     ## Sample 20 - 4314 reads in 897 unique sequences.
 
+Ici, l’algorithme compare la séquence observée au modèle d’erreur pour
+chacun des reads. Puis il corrige les reads en tenant compte des
+probabilités d’erreur. Si la différence observée peut être expliquée par
+une erreur de séquençage, alors le read est corrigé. Mais, si la
+différence ne peut pas être expliquée par la seule erreur de séquençage
+(càd que la différence est trop grande), le read sera considéré comme un
+variant biologique (ASV).
+
+## Sur les reads Reverse
+
 ``` r
 dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
 ```
@@ -150,6 +224,8 @@ dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
     ## Sample 19 - 6504 reads in 1502 unique sequences.
     ## Sample 20 - 4314 reads in 732 unique sequences.
 
+# Résultats : visualisation d’un exemple
+
 ``` r
 dadaFs[[1]]
 ```
@@ -157,6 +233,11 @@ dadaFs[[1]]
     ## dada-class: object describing DADA2 denoising results
     ## 128 sequence variants were inferred from 1979 input unique sequences.
     ## Key parameters: OMEGA_A = 1e-40, OMEGA_C = 1e-40, BAND_SIZE = 16
+
+Pour le 1er échantillon, l’algorithme a identifié 128 variants
+biologiques au sein des 1979 reads.
+
+# Fusion des reads appariés
 
 ``` r
 mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
@@ -222,12 +303,25 @@ head(mergers[[1]])
     ## 5       345       5       6    148         0      0      1   TRUE
     ## 6       282       6       5    148         0      0      2   TRUE
 
+Cette commande nous permet de visualiser les séquences les plus
+abondantes dans l’échantillon.
+
+# Construction d’une table contenant les séquences
+
 ``` r
 seqtab <- makeSequenceTable(mergers)
 dim(seqtab)
 ```
 
     ## [1]  20 293
+
+Cette table contient les séquences fusionnées avec, en lignes les
+échantillons, en colonnes les ASVs. Les valeurs contenues correspondent
+à l’abondance des séquences. La commande dim() permet de retourner la
+matrice de longueur 2. Le premier chiffre correspond au nombre
+d’échantillon (20), et le second au nombre d’ASV (293).
+
+# Distribution des longueurs des reads
 
 ``` r
 table(nchar(getSequences(seqtab)))
@@ -236,6 +330,17 @@ table(nchar(getSequences(seqtab)))
     ## 
     ## 251 252 253 254 255 
     ##   1  88 196   6   2
+
+On observe que : - 1 seule séquence a une longueur de 251 nucléotides. -
+88 reads ont une longueur de 252 nucléotides. - 196 reads ont une
+longueur de 253 nucléotides. - 6 reads ont une longueur de 254
+nucléotides. - 2 reads ont une longueur de 255 nucléotides.
+
+# Suppression des chimères
+
+Une séquence est dite chimérique lorsqu’elle est formée de deux
+fragments d’ADN qui s’hybrident partiellement et sont reconnus et
+amplifiés comme étant une seule et même séquence.
 
 ``` r
 seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
@@ -249,11 +354,20 @@ dim(seqtab.nochim)
 
     ## [1]  20 232
 
+Dans ce cas, on retrouve 61 séquences chimériques.
+
+# Proportion de reads ayant passé la filtration des chimères
+
 ``` r
 sum(seqtab.nochim)/sum(seqtab)
 ```
 
     ## [1] 0.9640374
+
+Ici, on remarque que 96,4% des séquences ont été conservées après
+filtration des chimères.
+
+# Suivi des reads au sein de la pipeline
 
 ``` r
 getN <- function(x) sum(getUniques(x))
@@ -271,6 +385,15 @@ head(track)
     ## F3D142  3183     2914      2799      2830   2595    2521
     ## F3D143  3178     2941      2822      2868   2553    2519
     ## F3D144  4827     4312      4151      4228   3646    3507
+
+Ces commandes permettent de visualiser et de retracer le chemin des
+reads à travers la pipeline dada2. On observe une perte d’information
+dues aux filtrations, ce qui est tout à fait normal.
+
+# Assignations taxonomiques
+
+Nous arrivons à l’étape de comparaison de nos ASVs à une base de données
+de références afin de leur attribuer une taxonomie.
 
 ``` r
 taxa <- assignTaxonomy(seqtab.nochim, "~/tutoriel_ADM/silva_nr99_v138.2_toGenus_trainset.fa.gz?download=1", multithread=TRUE)
@@ -297,6 +420,15 @@ head(taxa.print)
     ## [5,] "Bacteroides"
     ## [6,] NA
 
+On observe que, le phylum assigné majoritairement dans nos échantillons
+est celui des Bacteroidota. Pour certains, l’assignation a été jusqu’à
+la Famille où l’on retrouve deux représentants principaux :
+Muribaculaceae et Bacteroidaceae.
+
+# Evaluation de la précision de l’assignation
+
+## Echantillon de contrôle “Mock”
+
 ``` r
 unqs.mock <- seqtab.nochim["Mock",]
 unqs.mock <- sort(unqs.mock[unqs.mock>0], decreasing=TRUE) # Drop ASVs absent in the Mock
@@ -305,6 +437,12 @@ cat("DADA2 inferred", length(unqs.mock), "sample sequences present in the Mock c
 
     ## DADA2 inferred 20 sample sequences present in the Mock community.
 
+Ces commandes permettent de vérifier la précision et la sensibilité de
+la pipeline dada2 grâce à l’échantillon contrôle “Mock” connu.
+
+Dans ce cas, on remarque que 20 séquences ont été détectées dans la
+communauté Mock.
+
 ``` r
 mock.ref <- getSequences(file.path(path, "HMP_MOCK.v35.fasta"))
 match.ref <- sum(sapply(names(unqs.mock), function(x) any(grepl(x, mock.ref))))
@@ -312,6 +450,26 @@ cat("Of those,", sum(match.ref), "were exact matches to the expected reference s
 ```
 
     ## Of those, 20 were exact matches to the expected reference sequences.
+
+Sur ces 20 séquences, 20 correspondent précisemment aux séquences
+connues de Mock. Cela signifie que la pipeline n’a pas introduit de
+contaminant et que les résultats sur les autres séquences étudiées non
+contrôles, pourront être interprétés scientifiquement.
+
+# Conclusion globale
+
+On peut conclure que le suivi de la pipeline dada2 nous a permis
+d’estimer la qualité de nos séquences brutes et de les nettoyer. Puis,
+nous avons pu estimer les erreurs de séquençage, les détecter et les
+corriger. Cette étape nous a permis également d’identifier les variants
+biologiques (ASVs). Après fusion des reads (séquences complètes), et
+détection des chimères, nous avons créé une table de comptage des ASVs.
+Finalement, la pipeline dada2 nous a permis de réaliser une assignation
+taxonique qui pourra être interprétée écologiquement.
+
+# Partie phyloseq (optionnelle)
+
+## non commentée
 
 ``` r
 library(phyloseq)
@@ -442,39 +600,38 @@ ord.nmds.bray <- ordinate(ps.prop, method="NMDS", distance="bray")
 ```
 
     ## Run 0 stress 0.08043117 
-    ## Run 1 stress 0.0807634 
-    ## ... Procrustes: rmse 0.01056152  max resid 0.03251531 
-    ## Run 2 stress 0.08076337 
-    ## ... Procrustes: rmse 0.01049441  max resid 0.03229637 
-    ## Run 3 stress 0.09477218 
-    ## Run 4 stress 0.08616061 
-    ## Run 5 stress 0.08616061 
-    ## Run 6 stress 0.1334791 
-    ## Run 7 stress 0.09477197 
-    ## Run 8 stress 0.08616061 
-    ## Run 9 stress 0.08076337 
-    ## ... Procrustes: rmse 0.01049827  max resid 0.03230838 
-    ## Run 10 stress 0.08043116 
+    ## Run 1 stress 0.1327107 
+    ## Run 2 stress 0.08076336 
+    ## ... Procrustes: rmse 0.01048173  max resid 0.03225423 
+    ## Run 3 stress 0.1297738 
+    ## Run 4 stress 0.08076337 
+    ## ... Procrustes: rmse 0.01047682  max resid 0.03223878 
+    ## Run 5 stress 0.08043117 
     ## ... New best solution
-    ## ... Procrustes: rmse 2.13595e-06  max resid 5.013142e-06 
+    ## ... Procrustes: rmse 3.566876e-06  max resid 1.000167e-05 
     ## ... Similar to previous best
-    ## Run 11 stress 0.08043117 
-    ## ... Procrustes: rmse 3.996688e-06  max resid 8.121122e-06 
-    ## ... Similar to previous best
-    ## Run 12 stress 0.09477193 
-    ## Run 13 stress 0.08616061 
-    ## Run 14 stress 0.09477214 
-    ## Run 15 stress 0.08076339 
-    ## ... Procrustes: rmse 0.01054502  max resid 0.03246037 
-    ## Run 16 stress 0.08076337 
-    ## ... Procrustes: rmse 0.01050792  max resid 0.03233929 
-    ## Run 17 stress 0.09477212 
-    ## Run 18 stress 0.08076336 
-    ## ... Procrustes: rmse 0.01048714  max resid 0.0322704 
-    ## Run 19 stress 0.09477221 
-    ## Run 20 stress 0.08076342 
-    ## ... Procrustes: rmse 0.0105862  max resid 0.03259459 
-    ## *** Best solution repeated 2 times
+    ## Run 6 stress 0.08076337 
+    ## ... Procrustes: rmse 0.01050888  max resid 0.03234118 
+    ## Run 7 stress 0.08076338 
+    ## ... Procrustes: rmse 0.01052776  max resid 0.03240364 
+    ## Run 8 stress 0.09477182 
+    ## Run 9 stress 0.08076337 
+    ## ... Procrustes: rmse 0.01051287  max resid 0.0323543 
+    ## Run 10 stress 0.08616061 
+    ## Run 11 stress 0.1010629 
+    ## Run 12 stress 0.1228545 
+    ## Run 13 stress 0.09477103 
+    ## Run 14 stress 0.1212044 
+    ## Run 15 stress 0.08076336 
+    ## ... Procrustes: rmse 0.0104852  max resid 0.0322639 
+    ## Run 16 stress 0.08616061 
+    ## Run 17 stress 0.1274324 
+    ## Run 18 stress 0.08076337 
+    ## ... Procrustes: rmse 0.01052049  max resid 0.03237913 
+    ## Run 19 stress 0.1228545 
+    ## Run 20 stress 0.0807634 
+    ## ... Procrustes: rmse 0.01056226  max resid 0.03251611 
+    ## *** Best solution repeated 1 times
 
 ``` r
 plot_ordination(ps.prop, ord.nmds.bray, color="When", title="Bray NMDS")

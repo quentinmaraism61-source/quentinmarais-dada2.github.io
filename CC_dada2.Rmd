@@ -1,36 +1,62 @@
 ---
 title: "CC1_DADA2_QuentinMarais"
 output: github_document
+author : Quentin Marais
   
 ---
+
+# Installation du package "dada2"
+
+
 ```{r}
 library(dada2)
 ```
 
+# Chargement du jeu de données
 
 
 ```{r}
 path <- "~/tutoriel_ADM/MiSeq_SOP"
 list.files(path)
 ```
+
+# Créaton des listes pour les fichiers Forward (fnFs) et Reverse (fnRs)
+
 ```{r}
 fnFs <- sort(list.files(path, pattern="_R1_001.fastq", full.names = TRUE))
 fnRs <- sort(list.files(path, pattern="_R2_001.fastq", full.names = TRUE))
 ```
 
+# Extraction du nom de chaque échantillon des fichiers
+
 ```{r}
 sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
 ```
 
-
+# Visualisation des profils de qualité des reads
+## Qualité de la lecture Forward
 
 ```{r}
 plotQualityProfile(fnFs[1:2])
 ```
 
+Le but de cette étape est de visualiser la qualité de lecture des nucléotides des reads. 
+
+- En gris : La fréquence de chaque score de qualité pour chaque position.
+- La ligne verte : La moyenne du score de qualité pour chaque position. 
+- La ligne orange : Les quartiles montrant la variabilité de la qualité. 
+- La ligne rouge : La proportion de lectures qui atteignent cette position.
+
+Dans ce cas, on remarque que la qualité de mes reads en lecture Forward est bonne. 
+
+## Qualité de la lecture Reverse
+
 ```{r}
 plotQualityProfile(fnRs[1:2])
 ```
+Ici, on remarque directement que la qualité de lecture des reads est moins bonne que pour la lecture forward. Ce phénomène est connu en séquençage Illumina et se traite informatiquement grâce à la pipeline dada2. Ce score de qualité moins bon en Reverse est dû à une combinaison de facteurs comme la perte de processivité de l'ADN polymérase ou encore la diminution du rapport signal/bruit due à la chimie du séquençage. 
+
+# Filtration
 
 ```{r}
 filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
@@ -39,12 +65,22 @@ names(filtFs) <- sample.names
 names(filtRs) <- sample.names
 ```
 
+On relie noms des fichiers et noms des échantillons. 
+
+## Filtration et pré-traitement des reads
+
 ```{r}
 out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(240,160),
               maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
               compress=TRUE, multithread=FALSE) 
 head(out)
 ```
+Le tableau nous montre le nombre de reads avant (reads.in) et après (reads.out) filtration. On remarque que la majorité des séquences a été conservée. 
+
+
+# Taux d'erreur de séquençage
+
+Il arrive relativement régulièrement que des reads contiennent des erreurs de séquençage. La pipeline dada2 nous permet alors de discriminer les séquences qui existent réellement, des séquences contenant des erreurs de séquençage. 
 
 ```{r}
 errF <- learnErrors(filtFs, multithread=TRUE)
@@ -54,20 +90,38 @@ errF <- learnErrors(filtFs, multithread=TRUE)
 errR <- learnErrors(filtRs, multithread=TRUE)
 ```
 
+# Visualisation des taux d'erreur
+
 ```{r}
 plotErrors(errF, nominalQ=TRUE)
 ```
+Ici, la ligne noire représente le taux d'erreur estimé par l'algorithme. En rouge sont annotés les taux d'erreurs effectivement observés. Enfin la ligne rouge correspond au taux d'erreur attendu selon le Q score. 
 
+On remarque que, les points rouges suivent en effet la ligne noire. La réalité semble suivre l'estimation. On observe également que plus le Q score augmente, plus le taux d'erreur diminue. Ceci étant attendu.  
+
+# Algorithme de la pipeline dada2 : Correction ou identification 
+## Sur les reads Foward
 ```{r}
 dadaFs <- dada(filtFs, err=errF, multithread=TRUE)
 ```
+Ici, l'algorithme compare la séquence observée au modèle d'erreur pour chacun des reads. Puis il corrige les reads en tenant compte des probabilités d'erreur. Si la différence observée peut être expliquée par une erreur de séquençage, alors le read est corrigé. Mais, si la différence ne peut pas être expliquée par la seule erreur de séquençage (càd que la différence est trop grande), le read sera considéré comme un variant biologique (ASV). 
+
+
+## Sur les reads Reverse
+
 ```{r}
 dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
 ```
 
+
+# Résultats : visualisation d'un exemple
+
 ```{r}
 dadaFs[[1]]
 ```
+Pour le 1er échantillon, l'algorithme a identifié 128 variants biologiques au sein des 1979 reads. 
+
+# Fusion des reads appariés 
 
 ```{r}
 mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
@@ -75,23 +129,48 @@ mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
 head(mergers[[1]])
 ```
 
+Cette commande nous permet de visualiser les séquences les plus abondantes dans l'échantillon. 
+
+# Construction d'une table contenant les séquences
+
 ```{r}
 seqtab <- makeSequenceTable(mergers)
 dim(seqtab)
 ```
+Cette table contient les séquences fusionnées avec, en lignes les échantillons, en colonnes les ASVs. Les valeurs contenues correspondent à l'abondance des séquences. 
+La commande dim() permet de retourner la matrice de longueur 2. Le premier chiffre correspond au nombre d'échantillon (20), et le second au nombre d'ASV (293). 
+
+# Distribution des longueurs des reads
 
 ```{r}
 table(nchar(getSequences(seqtab)))
 ```
+On observe que : 
+- 1 seule séquence a une longueur de 251 nucléotides. 
+- 88 reads ont une longueur de 252 nucléotides. 
+- 196 reads ont une longueur de 253 nucléotides. 
+- 6 reads ont une longueur de 254 nucléotides. 
+- 2 reads ont une longueur de 255 nucléotides. 
+
+# Suppression des chimères
+
+Une séquence est dite chimérique lorsqu'elle est formée de deux fragments d'ADN qui s'hybrident partiellement et sont reconnus et amplifiés comme étant une seule et même séquence. 
 
 ```{r}
 seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
 dim(seqtab.nochim)
 ```
+Dans ce cas, on retrouve 61 séquences chimériques. 
+
+
+# Proportion de reads ayant passé la filtration des chimères
 
 ```{r}
 sum(seqtab.nochim)/sum(seqtab)
 ```
+Ici, on remarque que 96,4% des séquences ont été conservées après filtration des chimères. 
+
+# Suivi des reads au sein de la pipeline 
 
 ```{r}
 getN <- function(x) sum(getUniques(x))
@@ -101,15 +180,26 @@ colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "n
 rownames(track) <- sample.names
 head(track)
 ```
+Ces commandes permettent de visualiser et de retracer le chemin des reads à travers la pipeline dada2. On observe une perte d'information dues aux filtrations, ce qui est tout à fait normal. 
+
+# Assignations taxonomiques
+
+Nous arrivons à l'étape de comparaison de nos ASVs à une base de données de références afin de leur attribuer une taxonomie. 
+
 ```{r}
 taxa <- assignTaxonomy(seqtab.nochim, "~/tutoriel_ADM/silva_nr99_v138.2_toGenus_trainset.fa.gz?download=1", multithread=TRUE)
 ```
+
 
 ```{r}
 taxa.print <- taxa # Removing sequence rownames for display only
 rownames(taxa.print) <- NULL
 head(taxa.print)
 ```
+On observe que, le phylum assigné majoritairement dans nos échantillons est celui des Bacteroidota. Pour certains, l'assignation a été jusqu'à la Famille où l'on retrouve deux représentants principaux : Muribaculaceae et Bacteroidaceae. 
+
+# Evaluation de la précision de l'assignation
+## Echantillon de contrôle "Mock"
 
 ```{r}
 unqs.mock <- seqtab.nochim["Mock",]
@@ -117,11 +207,29 @@ unqs.mock <- sort(unqs.mock[unqs.mock>0], decreasing=TRUE) # Drop ASVs absent in
 cat("DADA2 inferred", length(unqs.mock), "sample sequences present in the Mock community.\n")
 ```
 
+Ces commandes permettent de vérifier la précision et la sensibilité de la pipeline dada2 grâce à l'échantillon contrôle "Mock" connu. 
+
+Dans ce cas, on remarque que 20 séquences ont été détectées dans la communauté Mock. 
+
 ```{r}
 mock.ref <- getSequences(file.path(path, "HMP_MOCK.v35.fasta"))
 match.ref <- sum(sapply(names(unqs.mock), function(x) any(grepl(x, mock.ref))))
 cat("Of those,", sum(match.ref), "were exact matches to the expected reference sequences.\n")
 ```
+Sur ces 20 séquences, 20 correspondent précisemment aux séquences connues de Mock. Cela signifie que la pipeline n'a pas introduit de contaminant et que les résultats sur les autres séquences étudiées non contrôles, pourront être interprétés scientifiquement. 
+
+
+# Conclusion globale
+
+On peut conclure que le suivi de la pipeline dada2 nous a permis d'estimer la qualité de nos séquences brutes et de les nettoyer. Puis, nous avons pu estimer les erreurs de séquençage, les détecter et les corriger. Cette étape nous a permis également d'identifier les variants biologiques (ASVs). Après fusion des reads (séquences complètes), et détection des chimères, nous avons créé une table de comptage des ASVs. Finalement, la pipeline dada2 nous a permis de réaliser une assignation taxonique qui pourra être interprétée écologiquement. 
+
+
+
+
+
+# Partie phyloseq (optionnelle)
+## non commentée
+
 ```{r}
 library(phyloseq)
 packageVersion("phyloseq")
