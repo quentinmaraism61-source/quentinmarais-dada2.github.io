@@ -1,9 +1,0 @@
----
-title: "R Notebook"
-output: github_document
----
-
-```{r}
-plot(iris)
-```
-This is my first knit ! Heyooooo
